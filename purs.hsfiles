@@ -1,0 +1,722 @@
+{-# START_FILE package.yaml #-}
+name:                {{name}}
+version:             0.1.0.0
+github:              "{{github-username}}{{^github-username}}githubuser{{/github-username}}/{{name}}"
+license:             BSD3
+author:              "{{author-name}}{{^author-name}}Author name here{{/author-name}}"
+maintainer:          "{{author-email}}{{^author-email}}example@example.com{{/author-email}}"
+copyright:           "{{copyright}}{{^copyright}}{{year}}{{^year}}2020{{/year}} {{author-name}}{{^author-name}}Author name here{{/author-name}}{{/copyright}}"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            {{category}}{{^category}}Web{{/category}}
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/{{github-username}}{{^github-username}}githubuser{{/github-username}}/{{name}}#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- http-client
+- network
+- servant
+- servant-server
+- wai-cors
+- wai-middleware-static
+- warp
+- bytestring
+- lens
+- monad-logger
+- mtl
+- safe-exceptions
+- text
+
+library:
+  source-dirs: src
+
+executables:
+  server:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - {{name}}
+
+  gen-purs:
+    main:                GeneratePureScript.hs
+    source-dirs:         gen
+    dependencies:
+    - {{name}}
+    - lens
+    - purescript-bridge
+    - servant-purescript
+
+tests:
+  {{name}}-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - {{name}}
+
+{-# START_FILE default.nix #-}
+let
+  haskellNixSrc = fetchTarball {
+    url = "https://github.com/input-output-hk/haskell.nix/tarball/f4136211c933b444ab2e0f358abd223929970220";
+    sha256 = "1b9nxzkg29hwczr6pb6a7arxka8z0swzq7b2bqyxqzr4qvpcjlc1";
+  };
+  haskellNix = import haskellNixSrc {};
+
+  all-hies = fetchTarball {
+    # Insert the desired all-hies commit here
+    url = "https://github.com/infinisil/all-hies/tarball/09ba836904fa290b5e37d5403150ea0c921661fb";
+    # Insert the correct hash after the first evaluation
+    sha256 = "0qbjqv1fkhkx1cffqybz1mfks1jphh0vh3zd8ad2qd6lch4gyys4";
+  };
+
+  pkgs = import haskellNix.sources.nixpkgs-2003 (haskellNix.nixpkgsArgs // {
+    overlays = haskellNix.nixpkgsArgs.overlays ++ [
+      (import all-hies {}).overlay
+    ];
+  });
+
+  set = pkgs.haskell-nix.stackProject {
+    name = "{{name}}";
+    src = pkgs.haskell-nix.haskellLib.cleanGit {
+      name = "{{name}}";
+      src = ./.;
+    };
+    modules = [{
+      # Make Cabal reinstallable
+      nonReinstallablePkgs = [ "rts" "ghc-heap" "ghc-prim" "integer-gmp" "integer-simple" "base" "deepseq" "array" "ghc-boot-th" "pretty" "template-haskell" "ghcjs-prim" "ghcjs-th" "ghc-boot" "ghc" "Win32" "array" "binary" "bytestring" "containers" "directory" "filepath" "ghc-boot" "ghc-compact" "ghc-prim" "hpc" "mtl" "parsec" "process" "text" "time" "transformers" "unix" "xhtml" "terminfo" ];
+    }];
+  };
+in set.{{name}}.components.exes.server // {
+  env = set.shellFor {
+    packages = p: [ p.{{name}} ];
+    tools = {
+      hie = "unstable";
+    };
+    nativeBuildInputs = [ pkgs.stack ];
+    shellHook = ''
+      export HIE_HOOGLE_DATABASE=$(realpath "$(dirname "$(realpath "$(which hoogle)")")/../share/doc/hoogle/default.hoo")
+    '';
+  };
+}
+
+{-# START_FILE shell.nix #-}
+(import ./.).env
+
+{-# START_FILE .envrc #-}
+use nix
+
+{-# START_FILE .ghcid #-}
+--command="stack ghci unused-dev:exe:server" --run="main"
+
+{-# START_FILE cabal.project #-}
+packages: .
+
+index-state: 2020-05-15T00:00:00Z
+
+{-# START_FILE Setup.hs #-}
+import Distribution.Simple
+main = defaultMain
+
+{-# START_FILE test/Spec.hs #-}
+main :: IO ()
+main = putStrLn "Test suite not yet implemented"
+
+{-# START_FILE gen/GeneratePureScript.hs #-}
+main :: IO ()
+main = return ()
+
+{-# START_FILE src/App.hs #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeOperators #-}
+
+module App where
+
+import Control.Lens
+import Control.Monad.Logger (LoggingT)
+import Control.Monad.Reader (ReaderT(..))
+import qualified Data.Text.Lazy as TL
+import Servant
+
+data AppConfig = AppConfig
+  { _appConfigDebug :: Bool
+  }
+  deriving (Show)
+
+data AppArg = AppArg
+  { _appArgConfig :: AppConfig
+  }
+
+type AppHandler = ReaderT AppArg (LoggingT Handler)
+type AppServer api = ServerT api AppHandler
+
+type ApiEcho = ReqBody '[PlainText] TL.Text :> Post '[PlainText] TL.Text
+type Api = "echo" :> ApiEcho
+
+api :: Proxy Api
+api = Proxy
+
+$(makeLenses ''AppConfig)
+$(makeLenses ''AppArg)
+
+appArgConfigDebug :: Lens' AppArg Bool
+appArgConfigDebug = appArgConfig . appConfigDebug
+
+{-# START_FILE src/Server.hs #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+module Server where
+
+import Control.Monad.Logger
+import Network.Wai.Handler.Warp
+  ( run
+  )
+import Network.Wai.Middleware.Cors
+  ( simpleCors
+  )
+import Network.Wai.Middleware.Static
+  ( addBase
+  , policy
+  , staticPolicy
+  )
+import Servant.API
+  ( (:<|>)(..)
+  )
+import Servant.Server
+  ( ServerError(..)
+  , err400
+  , hoistServer
+  , serve
+  )
+
+import Control.Exception (ErrorCall)
+import qualified Control.Exception.Safe as Exception (Handler(..))
+import Control.Exception.Safe (catches, throwM)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader (runReaderT)
+import qualified Data.ByteString.Lazy.Char8 as BLC
+import qualified Data.Text as T
+import qualified Data.Text.Lazy.IO as TL
+
+import App
+
+echo :: AppServer ApiEcho
+echo t = errorHandler $ do
+  liftIO $ TL.putStrLn t
+  return t
+
+errorHandler :: AppHandler a -> AppHandler a
+errorHandler = flip catches
+  [ Exception.Handler $ \(e :: ServerError) -> do
+      logErrorN $ T.pack $ show e
+      throwM e
+  , Exception.Handler $ \(e :: ErrorCall) -> do
+      logErrorN $ T.pack $ show e
+      throwM err400 { errBody = BLC.pack $ show e }
+  ]
+
+startServer :: IO ()
+startServer = do
+  let runLogger :: MonadIO m => LoggingT m a -> m a
+      runLogger = runStderrLoggingT . filterLogger (\_ level -> level > LevelDebug)
+  let arg = AppArg (AppConfig True)
+  run 8080 $ middleware $ serve api $ hoistServer api (runLogger . flip runReaderT arg)
+    $ echo
+ where
+  middleware = simpleCors . midPolicy
+  midPolicy = staticPolicy $ indexPolicy <> addBase "./html"
+  indexPolicy = policy $ Just . \b -> if null b || last b == '/' then b <> "index.html" else b
+
+serverMain :: IO ()
+serverMain = startServer
+
+{-# START_FILE app/Main.hs #-}
+module Main where
+
+import Server
+
+main :: IO ()
+main = serverMain
+
+{-# START_FILE frontend/index.html #-}
+<!doctype>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{name}}</title>
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+</html>
+
+{-# START_FILE frontend/package.json #-}
+{
+  "name": "purescript-webpack-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Example using PureScript with webpack",
+  "license": "MIT",
+  "repository": "ethul/purescript-webpack-example",
+  "author": {
+    "name": "Eric Thul",
+    "email": "thul.eric@gmail.com"
+  },
+  "files": [],
+  "scripts": {
+    "webpack": "DEBUG=purs-loader* DEBUG_DEPTH=100 webpack --mode development --progress --bail",
+    "webpack:watch": "DEBUG=purs-loader* DEBUG_DEPTH=100 webpack --mode development --progress --display-error-details --display verbose --watch",
+    "webpack:server": "webpack-dev-server --mode development --progress --inline --hot",
+    "webpack:server:debug": "DEBUG=purs-loader* DEBUG_DEPTH=100 webpack-dev-server --mode development --progress --inline --hot",
+    "purs:compile": "purs compile 'src/**/*.purs'",
+    "purs:bundle": "purs bundle output/**/*.js",
+    "start": "node bundle.js"
+  },
+  "dependencies": {
+    "html-webpack-plugin": "^4.2.0",
+    "lodash.difference": "^4.5.0",
+    "purescript-psa": "^0.7.3",
+    "purs-loader": "^3.6.0",
+    "react": "^16.9.0",
+    "react-dom": "^16.9.0",
+    "webpack": "^4.42.1",
+    "webpack-dev-server": "^3.11.0",
+    "wrappy": "^1.0.2",
+    "xhr2": "^0.2.0"
+  },
+  "devDependencies": {
+    "url-loader": "^2.1.0",
+    "webpack-cli": "^3.3.11"
+  }
+}
+
+{-# START_FILE frontend/packages.dhall #-}
+{-
+Welcome to your new Dhall package-set!
+
+Below are instructions for how to edit this file for most use
+cases, so that you don't need to know Dhall to use it.
+
+## Warning: Don't Move This Top-Level Comment!
+
+Due to how `dhall format` currently works, this comment's
+instructions cannot appear near corresponding sections below
+because `dhall format` will delete the comment. However,
+it will not delete a top-level comment like this one.
+
+## Use Cases
+
+Most will want to do one or both of these options:
+1. Override/Patch a package's dependency
+2. Add a package not already in the default package set
+
+This file will continue to work whether you use one or both options.
+Instructions for each option are explained below.
+
+### Overriding/Patching a package
+
+Purpose:
+- Change a package's dependency to a newer/older release than the
+    default package set's release
+- Use your own modified version of some dependency that may
+    include new API, changed API, removed API by
+    using your custom git repo of the library rather than
+    the package set's repo
+
+Syntax:
+Replace the overrides' "{=}" (an empty record) with the following idea
+The "//" or "⫽" means "merge these two records and
+  when they have the same value, use the one on the right:"
+-------------------------------
+let overrides =
+  { packageName =
+      upstream.packageName // { updateEntity1 = "new value", updateEntity2 = "new value" }
+  , packageName =
+      upstream.packageName // { version = "v4.0.0" }
+  , packageName =
+      upstream.packageName // { repo = "https://www.example.com/path/to/new/repo.git" }
+  }
+-------------------------------
+
+Example:
+-------------------------------
+let overrides =
+  { halogen =
+      upstream.halogen // { version = "master" }
+  , halogen-vdom =
+      upstream.halogen-vdom // { version = "v4.0.0" }
+  }
+-------------------------------
+
+### Additions
+
+Purpose:
+- Add packages that aren't already included in the default package set
+
+Syntax:
+Replace the additions' "{=}" (an empty record) with the following idea:
+-------------------------------
+let additions =
+  { package-name =
+       { dependencies =
+           [ "dependency1"
+           , "dependency2"
+           ]
+       , repo =
+           "https://example.com/path/to/git/repo.git"
+       , version =
+           "tag ('v4.0.0') or branch ('master')"
+       }
+  , package-name =
+       { dependencies =
+           [ "dependency1"
+           , "dependency2"
+           ]
+       , repo =
+           "https://example.com/path/to/git/repo.git"
+       , version =
+           "tag ('v4.0.0') or branch ('master')"
+       }
+  , etc.
+  }
+-------------------------------
+
+Example:
+-------------------------------
+let additions =
+  { benchotron =
+      { dependencies =
+          [ "arrays"
+          , "exists"
+          , "profunctor"
+          , "strings"
+          , "quickcheck"
+          , "lcg"
+          , "transformers"
+          , "foldable-traversable"
+          , "exceptions"
+          , "node-fs"
+          , "node-buffer"
+          , "node-readline"
+          , "datetime"
+          , "now"
+          ]
+      , repo =
+          "https://github.com/hdgarrood/purescript-benchotron.git"
+      , version =
+          "v7.0.0"
+      }
+  }
+-------------------------------
+-}
+
+
+let upstream =
+      https://github.com/purescript/package-sets/releases/download/psc-0.13.8-20200724/packages.dhall sha256:bb941d30820a49345a0e88937094d2b9983d939c9fd3a46969b85ce44953d7d9
+
+let overrides = {=}
+
+let additions = {=}
+
+in  upstream // overrides // additions
+
+{-# START_FILE frontend/shell.nix #-}
+{ pkgs ? import <nixpkgs> {} }:
+
+with pkgs;
+
+let
+  easyPS = import (pkgs.fetchFromGitHub {
+    owner = "justinwoo";
+    repo = "easy-purescript-nix";
+    rev = "ee8d4545c3eb14ea75b789dbfb84e4e8573941b5";
+    sha256 = "16bcllaf2ra0cbgkc5vlirkh2kkf16237xp4wng6314m3fsxmmag";
+  }) { inherit pkgs; };
+in stdenv.mkDerivation {
+  name = "env";
+  buildInputs = with easyPS; [ purs spago ];
+}
+
+{-# START_FILE frontend/spago.dhall #-}
+{-
+Welcome to a Spago project!
+You can edit this file as you like.
+-}
+{ name = "{{name}}"
+, dependencies =
+  [ "console", "effect", "psci-support"
+  , "affjax"
+  , "halogen"
+  , "web-events"
+  ]
+, packages = ./packages.dhall
+, sources = [ "src/**/*.purs", "test/**/*.purs" ]
+}
+
+{-# START_FILE frontend/webpack.config.js #-}
+'use strict';
+
+const path = require('path');
+
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+
+const webpack = require('webpack');
+
+const isWebpackDevServer = process.argv.some(a => path.basename(a) === 'webpack-dev-server');
+
+const isWatch = process.argv.some(a => a === '--watch');
+
+const plugins =
+  isWebpackDevServer || !isWatch ? [] : [
+    function(){
+      this.plugin('done', function(stats){
+        process.stderr.write(stats.toString('errors-only'));
+      });
+    }
+  ]
+;
+
+module.exports = {
+  devtool: 'eval-source-map',
+
+  devServer: {
+    contentBase: path.resolve(__dirname, 'dist'),
+    port: 4008,
+    stats: 'errors-only'
+  },
+
+  entry: './src/entrypoint.js',
+
+  output: {
+    path: path.resolve(__dirname, 'dist'),
+    filename: 'bundle.js'
+  },
+
+  module: {
+    rules: [
+      {
+        test: /\.purs$/,
+        use: [
+          {
+            loader: 'purs-loader',
+            options: {
+              src: [
+                'src/**/*.purs'
+              ],
+              spago: true,
+              watch: isWebpackDevServer || isWatch,
+              pscIde: true
+            }
+          }
+        ]
+      },
+      {
+        test: /\.(png|jpg|gif)$/i,
+        use: [
+          {
+            loader: 'url-loader',
+            options: {
+              limit: 8192,
+            },
+          },
+        ],
+      },
+    ]
+  },
+
+  resolve: {
+    modules: [ 'node_modules' ],
+    extensions: [ '.purs', '.js']
+  },
+
+  plugins: [
+    new webpack.LoaderOptionsPlugin({
+      debug: true
+    }),
+    new HtmlWebpackPlugin({
+      title: 'purescript-webpack-example',
+      template: 'index.html'
+    })
+  ].concat(plugins)
+};
+
+{-# START_FILE frontend/src/Main.purs #-}
+module Main where
+
+import Prelude
+
+import Affjax as AX
+import Affjax.ResponseFormat as AXRF
+import Affjax.RequestBody as AXRB
+import Affjax.StatusCode (StatusCode(..))
+import Data.Array ((:))
+import Data.Either (Either(..))
+import Data.Maybe (Maybe(..))
+import Effect (Effect)
+import Effect.Aff.Class (class MonadAff)
+import Effect.Console as Console
+import Halogen as H
+import Halogen.Aff as HA
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
+import Halogen.HTML.Properties as HP
+import Halogen.VDom.Driver (runUI)
+import Web.Event.Event (Event)
+import Web.Event.Event as Event
+
+root :: String
+root = "http://localhost:8080"
+
+main :: Effect Unit
+main = HA.runHalogenAff do
+  body <- HA.awaitBody
+  runUI component unit body
+
+data Action = TextFired String | ButtonClicked Event
+
+component :: forall f i o m. MonadAff m => H.Component HH.HTML f i o m
+component =
+  H.mkComponent
+    { initialState
+    , render
+    , eval: H.mkEval $ H.defaultEval { handleAction = handleAction }
+    }
+  where
+  initialState _ =
+    { value: ""
+    , loading: false
+    , results: []
+    }
+
+  render state =
+    HH.div_
+      [ HH.form
+        [ HE.onSubmit $ Just <<< ButtonClicked ]
+        [ HH.input
+          [ HE.onValueInput $ Just <<< TextFired
+          , HP.type_ HP.InputText
+          , HP.value state.value
+          ]
+        , HH.button
+          [ HP.disabled state.loading
+          , HP.type_ HP.ButtonSubmit
+          ]
+          [ HH.text "send" ]
+        ]
+      , HH.div_ [ HH.text $ show state ]
+      ]
+
+  handleAction = case _ of
+    TextFired v -> H.modify_ \state -> state { value = v }
+    ButtonClicked event -> do
+      H.liftEffect $ Event.preventDefault event
+      H.modify_ $ _{ loading = true }
+      state <- H.get
+      er <- H.liftAff $ AX.post AXRF.string (root <> "/echo") $ Just $ AXRB.string state.value
+      case er of
+        Left e -> do
+          H.liftEffect $ Console.log $ AX.printError e
+          H.modify_ $ _{ loading = false }
+        Right rb -> do
+          if rb.status == StatusCode 200
+            then do
+              H.modify_ $ _{ loading = false, results = { req: state.value, res: rb.body } : state.results }
+            else do
+              H.modify_ $ _{ loading = false }
+
+{-# START_FILE frontend/src/entrypoint.js #-}
+'use strict';
+
+require('./Main.purs').main();
+
+if (module.hot) {
+  module.hot.accept();
+}
+
+{-# START_FILE frontend/test/Main.purs #-}
+module Test.Main where
+
+import Prelude
+
+import Effect (Effect)
+import Effect.Class.Console (log)
+
+main :: Effect Unit
+main = do
+  log "🍝"
+  log "You should add some tests."
+
+{-# START_FILE README.md #-}
+# {{name}}
+
+{-# START_FILE ChangeLog.md #-}
+# Changelog for {{name}}
+
+## Unreleased changes
+
+{-# START_FILE LICENSE #-}
+Copyright {{author-name}}{{^author-name}}Author name here{{/author-name}} (c) {{year}}{{^year}}2020{{/year}}
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above
+      copyright notice, this list of conditions and the following
+      disclaimer in the documentation and/or other materials provided
+      with the distribution.
+
+    * Neither the name of {{author-name}}{{^author-name}}Author name here{{/author-name}} nor the names of other
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+{-# START_FILE .gitignore #-}
+result/
+.stack-work/
+*~
+{-# START_FILE frontend/.gitignore #-}
+/bower_components/
+/node_modules/
+/.pulp-cache/
+/output/
+/generated-docs/
+/.psc-package/
+/.psc*
+/.purs*
+/.psa*
+/.spago
