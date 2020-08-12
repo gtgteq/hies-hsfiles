@@ -502,6 +502,11 @@ module.exports = {
     contentBase: path.resolve(__dirname, 'dist'),
     port: 4008,
     stats: 'errors-only'
+    proxy: {
+      '/echo': {
+        target: 'http://localhost:8080'
+      }
+    }
   },
 
   entry: './src/entrypoint.js',
